@@ -1,0 +1,1 @@
+from RandomShapelets.RandomShapeletClassifier import RandomShapeletForest

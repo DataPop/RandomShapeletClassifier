@@ -4,14 +4,10 @@ import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import cross_val_score, GridSearchCV
+from sklearn.model_selection import GridSearchCV
 
 
-"""
-
-This class implements the sklearn estimator interface, so sklearn tools like GridsearchCV can be used
-"""
-class RandomShapeletClassifier(BaseEstimator):
+class RandomShapeletForest(BaseEstimator):
     def __init__(self, 
                  number_shapelets = 20, 
                  min_shapelet_length=30, 
@@ -46,43 +42,46 @@ class RandomShapeletClassifier(BaseEstimator):
     def fit(self, X, y):
         self.number_shapelets = self.number_shapelets
         self.X = X
-        self.y = y
+        self.y = pd.Series(y).values.ravel()
         #self.train_labels = utils.get_one_active_representation(y)
-        self.train_size, self.output_size = y.shape
-        self.train_forest()
+        self.model = self.train_forest()
         return self
+    
+    
+    def predict(self, X):
+        self.transformed_data = self.transform(X)
+        return self.model.predict(self.transformed_data)
 
     
     def train_forest(self):
-        FOREST_DICT = {}
-        for tree_x in range(0, 20):
-            FOREST_DICT['shapelet_feature %s'%tree_x] = self.get_similarities_random_shapelet()
-        
-        DF = pd.DataFrame.from_dict(FOREST_DICT, orient = 'index')
-        LEARN = pd.DataFrame(columns = DF.index, index = self.X.keys())
-        LEARN['class'] = self.y
-        for c in DF.index: LEARN[c] = LEARN.index.map(FOREST_DICT[c])
-        LEARN = LEARN.dropna(axis='index', how='any', thresh = 2)
-        LEARN.fillna(-1., inplace = True)
-        
-        tuned_parameters = [{'n_estimators': [1, 19, 50, 100, 200], 'max_depth': [1, 2, 5, 10],
+        self.RANDOM_SHAPELETS  = self.get_random_shapelets()
+        self.transformed_data = self.transform(self.X)
+
+        tuned_parameters = [{'n_estimators': [1, 19, 50, 100], 'max_depth': [1, 2, 5],
                      'min_samples_leaf': [1, 2, 5]}]
         
         model = GridSearchCV(RandomForestClassifier(), tuned_parameters, cv=2, scoring='precision_macro')
-        model.fit(LEARN[DF.index], LEARN['class'])
-        LEARN['prediction'] = model.predict(LEARN[DF.index])
+        model.fit(self.transformed_data, self.y)
+        return model
+    
+    def get_random_shapelets(self):
+        RANDOM_SHAPELETS = {}
+        for i in range(0, self.number_shapelets):
+            timeseries = self.sample_column()
+            shapelet = self.sample_shapelet(timeseries)
+            RANDOM_SHAPELETS['shapelet_%s'%i] = shapelet
+        return RANDOM_SHAPELETS
+    
+    def transform(self, X):
+        TRANSFORMED = pd.DataFrame(index = X.keys(), columns = self.RANDOM_SHAPELETS.keys())
+        for s in self.RANDOM_SHAPELETS.keys():
+            for c in X.columns: 
+                TRANSFORMED.loc[c, s] = self.get_max_correlation(X[c], self.RANDOM_SHAPELETS[s])
         
-        
-    
-    
-    def get_similarities_random_shapelet(self):
-        timeseries = self.sample_column()
-        shapelet = self.sample_shapelet(timeseries)
-        CORRELATIONS = {}
-        for c in self.X.columns: 
-            CORRELATIONS[c] = self.get_max_correlation(self.X[c], shapelet)
-        return CORRELATIONS
-    
+        TRANSFORMED = TRANSFORMED.dropna(axis='index', how='any', thresh = 2)
+        TRANSFORMED.fillna(-1., inplace = True)
+        return TRANSFORMED  
+          
     
     def get_max_correlation(self, timeseries, shapelet):
         '''
@@ -109,7 +108,6 @@ class RandomShapeletClassifier(BaseEstimator):
     
     def sample_column(self):
         random_column = self.X.columns[np.random.choice(np.array(range(0, len(self.X.columns))))]
-        print(random_column)
         random_series = self.X[random_column]
         return random_series
         
@@ -120,5 +118,8 @@ class RandomShapeletClassifier(BaseEstimator):
         
         ii = np.random.choice(np.array(range(0, len(timeseries) - random_shapelet_length)))
         random_shapelet = np.array(timeseries[ii:ii + random_shapelet_length])
-        print(random_shapelet)
         return random_shapelet
+
+
+
+
